@@ -1,0 +1,6 @@
+{
+  "name": "Vérificateur de Signature PDF",
+  "description": "Chargez un document PDF pour analyser son contenu et détecter la présence de signatures à l'aide de l'IA Gemini. L'application convertit les pages PDF en images et utilise l'IA pour identifier les motifs de signature.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
