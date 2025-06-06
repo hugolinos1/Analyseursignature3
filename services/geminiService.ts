@@ -1,7 +1,7 @@
-import { GoogleGenAI, GenerateContentResponse, Part } from '@google/genai';
 import type { GeminiAnalysisResponse } from '../types';
 import { 
   GEMINI_ANALYSIS_PROMPT,
+  GEMINI_MODEL_NAME, // Import model name
   KEY_HANDWRITTEN_SIGNATURE,
   KEY_ELECTRONIC_SIGNATURE,
   KEY_ANNOTATIONS,
@@ -9,48 +9,46 @@ import {
 } from '../constants';
 
 export const analyzeImageForSignature = async (
-  ai: GoogleGenAI,
-  modelName: string,
   imageBase64Data: string, // Raw base64 string, without 'data:image/...;base64,'
   mimeType: string // e.g., 'image/png' or 'image/jpeg'
 ): Promise<GeminiAnalysisResponse> => {
-  if (!ai) {
-    throw new Error("L'instance de GoogleGenAI n'est pas initialisée.");
-  }
-
-  const imagePart: Part = {
-    inlineData: {
-      mimeType: mimeType,
-      data: imageBase64Data,
-    },
-  };
-
-  const textPart: Part = {
-    text: GEMINI_ANALYSIS_PROMPT, // Use the new detailed prompt
-  };
-
   const defaultErrorResponse: GeminiAnalysisResponse = {
     handwrittenSignature: false,
     electronicSignature: false,
     annotations: false,
-    details: "Erreur lors de l'analyse par l'IA.",
+    details: "Erreur lors de l'analyse par l'IA via le proxy.",
+  };
+
+  const requestBody = {
+    imageBase64Data,
+    mimeType,
+    modelName: GEMINI_MODEL_NAME,
+    promptText: GEMINI_ANALYSIS_PROMPT,
   };
 
   try {
-    const response: GenerateContentResponse = await ai.models.generateContent({
-      model: modelName,
-      contents: [{ parts: [imagePart, textPart] }],
-      config: {
-        responseMimeType: "application/json", // Request JSON output
-      }
+    const response = await fetch('/.netlify/functions/gemini-proxy', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
     });
 
-    let jsonStr = response.text.trim();
-    const fenceRegex = /^```(\w*)?\s*\n?(.*?)\n?\s*```$/s;
-    const match = jsonStr.match(fenceRegex);
-    if (match && match[2]) {
-      jsonStr = match[2].trim();
+    if (!response.ok) {
+      let errorDetails = `Proxy request failed with status ${response.status}.`;
+      try {
+        const errorData = await response.json(); // Try to parse error response from proxy
+        errorDetails += ` Details: ${errorData.error || JSON.stringify(errorData)}`;
+      } catch (e) {
+        errorDetails += ` Body: ${await response.text()}`;
+      }
+      throw new Error(errorDetails);
     }
+
+    // The proxy should return the direct JSON from Gemini (already cleaned of markdown)
+    // The proxy's response body is a string, which needs to be parsed here.
+    const jsonStr = await response.text(); // Get the response body as text
 
     try {
       const parsedData = JSON.parse(jsonStr);
@@ -62,23 +60,19 @@ export const analyzeImageForSignature = async (
         details: typeof parsedData[KEY_DETAILS] === 'string' ? parsedData[KEY_DETAILS] : "Aucun détail fourni.",
       };
     } catch (parseError) {
-      console.error("Erreur de parsing JSON de la réponse Gemini:", parseError, "Réponse brute:", response.text);
+      console.error("Erreur de parsing JSON de la réponse du proxy:", parseError, "Réponse brute du proxy:", jsonStr);
       return {
         ...defaultErrorResponse,
-        details: `Erreur de parsing JSON: ${ (parseError as Error).message }. Réponse IA: ${response.text.substring(0,100)}...`
+        details: `Erreur de parsing JSON (proxy): ${ (parseError as Error).message }. Réponse du proxy (extrait): ${jsonStr.substring(0,100)}...`
       };
     }
     
   } catch (error) {
-    console.error("Erreur de l'API Gemini:", error);
-    let errorMessage = (error as any)?.message || "Une erreur est survenue lors de l'analyse par l'IA.";
-    // Check if the error message string contains specific keywords indicating a proxy or network issue
-    if (typeof errorMessage === 'string' && (errorMessage.includes('502') || errorMessage.toLowerCase().includes('failed to fetch') || errorMessage.toLowerCase().includes('proxying failed'))) {
-        errorMessage += " Cela peut indiquer un problème avec un proxy (comme celui configuré via le service worker) ou un service intermédiaire. Vérifiez la configuration réseau et les logs du serveur proxy (sur Cloud Run : /api-proxy/).";
-    }
+    console.error("Erreur lors de l'appel au proxy Gemini ou du traitement de sa réponse:", error);
+    let errorMessage = (error as Error)?.message || "Une erreur est survenue lors de la communication avec le service d'analyse IA.";
     return { 
         ...defaultErrorResponse,
-        details: `Erreur API Gemini: ${errorMessage}`
+        details: `Erreur service IA: ${errorMessage}`
     };
   }
 };

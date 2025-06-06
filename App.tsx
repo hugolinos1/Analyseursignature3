@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { GoogleGenAI } from '@google/genai';
+// GoogleGenAI import removed
 import { FileUpload } from './components/FileUpload';
 import { PdfPagePreview } from './components/PdfPagePreview';
 import { Spinner } from './components/Spinner';
@@ -8,9 +8,9 @@ import { Alert } from './components/Alert';
 import { convertPdfToImages } from './services/pdfService';
 import { analyzeImageForSignature } from './services/geminiService';
 import type { PageAnalysisResult, AlertMessage, GeminiPageAnalysis } from './types';
-import { MAX_PAGES_TO_PROCESS, GEMINI_MODEL_NAME } from './constants';
-
-const API_KEY = import.meta.env.VITE_API_KEY;
+// GEMINI_MODEL_NAME is still used by geminiService, but not directly in App.tsx for the call
+import { MAX_PAGES_TO_PROCESS } from './constants';
+// API_KEY constant removed
 
 interface OverallAnalysis {
   caseType: string;
@@ -26,21 +26,9 @@ const App: React.FC = () => {
   const [overallAnalysis, setOverallAnalysis] = useState<OverallAnalysis | null>(null);
   const [alertMessage, setAlertMessage] = useState<AlertMessage | null>(null);
   const [progressMessage, setProgressMessage] = useState<string | null>(null);
-  const [aiInstance, setAiInstance] = useState<GoogleGenAI | null>(null);
+  // aiInstance state removed
 
-  useEffect(() => {
-    if (!API_KEY) {
-      setAlertMessage({ type: 'error', message: "Clé API Gemini (API_KEY) non configurée ou non accessible côté client. Assurez-vous qu'elle est correctement injectée lors du build ou disponible dans l'environnement d'exécution du navigateur." });
-      return;
-    }
-    try {
-      const genAI = new GoogleGenAI({ apiKey: API_KEY });
-      setAiInstance(genAI);
-    } catch (error) {
-      console.error("Erreur d'initialisation Gemini:", error);
-      setAlertMessage({ type: 'error', message: "Erreur lors de l'initialisation du service IA. Vérifiez la console pour plus de détails." });
-    }
-  }, []);
+  // useEffect for AI initialization removed
 
   const handleFileSelect = useCallback((selectedFile: File) => {
     if (selectedFile.type !== 'application/pdf') {
@@ -124,10 +112,11 @@ const App: React.FC = () => {
       setAlertMessage({ type: 'warning', message: 'Aucun fichier PDF sélectionné.' });
       return;
     }
-    if (!aiInstance) {
-      setAlertMessage({ type: 'error', message: "Le service IA n'est pas initialisé. Vérifiez la configuration de la clé API côté client ou les erreurs précédentes." });
-      return;
-    }
+    // Removed aiInstance check, proxy handles API availability
+    // if (!aiInstance) {
+    //   setAlertMessage({ type: 'error', message: "Le service IA n'est pas initialisé. Vérifiez la configuration de la clé API côté client ou les erreurs précédentes." });
+    //   return;
+    // }
 
     setIsProcessingPdf(true);
     setAlertMessage(null);
@@ -173,7 +162,8 @@ const App: React.FC = () => {
           throw new Error(`Données d'image invalides pour la page ${pageData.pageNumber}.`);
         }
 
-        const analysisResult: GeminiPageAnalysis = await analyzeImageForSignature(aiInstance, GEMINI_MODEL_NAME, base64Data, imageMimeType);
+        // Updated call to analyzeImageForSignature, aiInstance and GEMINI_MODEL_NAME removed
+        const analysisResult: GeminiPageAnalysis = await analyzeImageForSignature(base64Data, imageMimeType);
         
         setPages(prev => prev.map(p => p.id === pageData.id ? { ...p, status: 'analyzed', analysis: analysisResult } : p));
         return { ...pageData, status: 'analyzed', analysis: analysisResult } as PageAnalysisResult;
@@ -201,7 +191,7 @@ const App: React.FC = () => {
       setIsAnalyzing(false);
       setProgressMessage(null);
     }
-  }, [file, aiInstance]);
+  }, [file]); // aiInstance removed from dependency array
 
   const isLoading = isProcessingPdf || isAnalyzing;
 
@@ -216,82 +206,70 @@ const App: React.FC = () => {
         </p>
       </header>
 
-      {/* This first alert specifically checks if API_KEY was undefined at the moment of App component mount, which for browsers means it wasn't injected by a build process. */}
-      {!import.meta.env.VITE_API_KEY && aiInstance === null && (
-         <Alert type="error" message="Configuration API (VITE_API_KEY) manquante côté client. L'application ne peut pas fonctionner." />
-      )}
-
-      {/* This alert covers cases where API_KEY might have been present but initialization of GoogleGenAI failed for other reasons. */}
-      {import.meta.env.VITE_API_KEY && !aiInstance && !alertMessage && (
-        <div className="bg-slate-800 p-6 rounded-lg shadow-xl text-center">
-          <Spinner />
-          <p className="mt-2 text-slate-300">Initialisation du service IA...</p>
-        </div>
-      )}
+      {/* API Key related alerts and AI initialization spinner removed */}
       
       {alertMessage && <Alert type={alertMessage.type} message={alertMessage.message} onClose={() => setAlertMessage(null)} />}
 
-      {/* Only render main UI if aiInstance is successfully created OR if there's an API_KEY (implying initialization is pending or failed but might be retried/handled) */}
-      {(aiInstance || import.meta.env.VITE_API_KEY) && (
-        <div className="w-full max-w-3xl bg-slate-800 p-6 sm:p-8 rounded-xl shadow-2xl space-y-6">
-          <FileUpload onFileSelect={handleFileSelect} isLoading={isLoading} />
+      {/* Main UI now always rendered, not dependent on API_KEY or aiInstance */}
+      <div className="w-full max-w-3xl bg-slate-800 p-6 sm:p-8 rounded-xl shadow-2xl space-y-6">
+        <FileUpload onFileSelect={handleFileSelect} isLoading={isLoading} />
 
-          {file && (
-            <div className="text-center">
-              <p className="text-slate-300">Fichier sélectionné: <span className="font-semibold text-sky-400">{file.name}</span></p>
-              <button
-                onClick={processAndAnalyzePdf}
-                disabled={isLoading || !aiInstance} // Disable if AI not ready
-                className="mt-4 w-full sm:w-auto bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-              >
-                {isLoading ? <Spinner /> : <i className="fas fa-search-plus mr-2"></i>}
-                {isProcessingPdf ? 'Traitement PDF...' : isAnalyzing ? 'Analyse IA...' : 'Analyser le Document'}
-              </button>
-            </div>
-          )}
-          
-          {isLoading && progressMessage && (
-            <div className="mt-4 text-center text-sky-300">
-              <Spinner inline={true} />
-              <p className="ml-2 inline">{progressMessage}</p>
-            </div>
-          )}
+        {file && (
+          <div className="text-center">
+            <p className="text-slate-300">Fichier sélectionné: <span className="font-semibold text-sky-400">{file.name}</span></p>
+            <button
+              onClick={processAndAnalyzePdf}
+              disabled={isLoading} // Disable only when isLoading
+              className="mt-4 w-full sm:w-auto bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+            >
+              {isLoading ? <Spinner /> : <i className="fas fa-search-plus mr-2"></i>}
+              {isProcessingPdf ? 'Traitement PDF...' : isAnalyzing ? 'Analyse IA...' : 'Analyser le Document'}
+            </button>
+          </div>
+        )}
 
-          {overallAnalysis && !isLoading && (
-            <div className="mt-6 p-5 rounded-lg bg-slate-700/50 border border-slate-600 shadow-lg">
-              <h3 className="text-2xl font-semibold text-sky-300 mb-3">{overallAnalysis.caseType}</h3>
-              <p className="text-slate-300 mb-3 text-sm">{overallAnalysis.justification}</p>
-              {overallAnalysis.detailsPerPage.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-slate-600">
-                  <h4 className="text-md font-semibold text-slate-200 mb-2">Détails par page :</h4>
-                  <ul className="list-disc list-inside space-y-1 text-sm text-slate-300 max-h-40 overflow-y-auto pr-2">
-                    {overallAnalysis.detailsPerPage.map(detail => (
-                      <li key={`detail-p${detail.pageNumber}`}>
-                        <span className="font-semibold">Page {detail.pageNumber}:</span> {detail.findings}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-               {overallAnalysis.detailsPerPage.length === 0 && overallAnalysis.caseType !== "Cas 1: Aucune modification détectée" && (
-                <p className="text-sm text-yellow-400 mt-2">Note: L'IA a classifié le document mais n'a pas retourné de détails spécifiques pour les éléments détectés sur chaque page.</p>
-              )}
-            </div>
-          )}
-          
-          {pages.length > 0 && (
-            <div className="mt-8">
-              <h3 className="text-xl font-semibold mb-4 text-slate-200">Aperçu des pages analysées ({pages.length > MAX_PAGES_TO_PROCESS && pages.length !== MAX_PAGES_TO_PROCESS ? MAX_PAGES_TO_PROCESS : pages.length} / {file?.name ? (pages.length === MAX_PAGES_TO_PROCESS ? 'premières' : '') : ''} pages):</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {pages.map((page) => (
-                  <PdfPagePreview key={page.id} page={page} />
-                ))}
+        {isLoading && progressMessage && (
+          <div className="mt-4 text-center text-sky-300">
+            <Spinner inline={true} />
+            <p className="ml-2 inline">{progressMessage}</p>
+          </div>
+        )}
+
+        {overallAnalysis && !isLoading && (
+          <div className="mt-6 p-5 rounded-lg bg-slate-700/50 border border-slate-600 shadow-lg">
+            <h3 className="text-2xl font-semibold text-sky-300 mb-3">{overallAnalysis.caseType}</h3>
+            <p className="text-slate-300 mb-3 text-sm">{overallAnalysis.justification}</p>
+            {overallAnalysis.detailsPerPage.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-slate-600">
+                <h4 className="text-md font-semibold text-slate-200 mb-2">Détails par page :</h4>
+                <ul className="list-disc list-inside space-y-1 text-sm text-slate-300 max-h-40 overflow-y-auto pr-2">
+                  {overallAnalysis.detailsPerPage.map(detail => (
+                    <li key={`detail-p${detail.pageNumber}`}>
+                      <span className="font-semibold">Page {detail.pageNumber}:</span> {detail.findings}
+                    </li>
+                  ))}
+                </ul>
               </div>
+            )}
+             {overallAnalysis.detailsPerPage.length === 0 && overallAnalysis.caseType !== "Cas 1: Aucune modification détectée" && (
+              <p className="text-sm text-yellow-400 mt-2">Note: L'IA a classifié le document mais n'a pas retourné de détails spécifiques pour les éléments détectés sur chaque page.</p>
+            )}
+          </div>
+        )}
+
+        {pages.length > 0 && (
+          <div className="mt-8">
+            <h3 className="text-xl font-semibold mb-4 text-slate-200">Aperçu des pages analysées ({pages.length > MAX_PAGES_TO_PROCESS && pages.length !== MAX_PAGES_TO_PROCESS ? MAX_PAGES_TO_PROCESS : pages.length} / {file?.name ? (pages.length === MAX_PAGES_TO_PROCESS ? 'premières' : '') : ''} pages):</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {pages.map((page) => (
+                <PdfPagePreview key={page.id} page={page} />
+              ))}
             </div>
-          )}
-        </div>
-      )}
-       <footer className="mt-12 text-center text-slate-400 text-sm">
+          </div>
+        )}
+      </div>
+      {/* Closing parenthesis for the main UI div was removed here, as it's no longer conditional based on aiInstance or API_KEY */}
+      <footer className="mt-12 text-center text-slate-400 text-sm">
         <p>&copy; {new Date().getFullYear()} Vérificateur de Modifications PDF. Propulsé par Gemini AI.</p>
         <p className="text-xs mt-1">Note: Cette application identifie les motifs visuels. Elle ne valide pas l'authenticité cryptographique des signatures.</p>
       </footer>
