@@ -10,7 +10,7 @@ import { analyzeImageForSignature } from './services/geminiService';
 import type { PageAnalysisResult, AlertMessage, GeminiPageAnalysis } from './types';
 import { MAX_PAGES_TO_PROCESS, GEMINI_MODEL_NAME } from './constants';
 
-const API_KEY = process.env.API_KEY;
+const API_KEY = import.meta.env.VITE_API_KEY;
 
 interface OverallAnalysis {
   caseType: string;
@@ -217,12 +217,12 @@ const App: React.FC = () => {
       </header>
 
       {/* This first alert specifically checks if API_KEY was undefined at the moment of App component mount, which for browsers means it wasn't injected by a build process. */}
-      {!process.env.API_KEY && aiInstance === null && (
-         <Alert type="error" message="Configuration API (API_KEY) manquante côté client. L'application ne peut pas fonctionner." />
+      {!import.meta.env.VITE_API_KEY && aiInstance === null && (
+         <Alert type="error" message="Configuration API (VITE_API_KEY) manquante côté client. L'application ne peut pas fonctionner." />
       )}
 
       {/* This alert covers cases where API_KEY might have been present but initialization of GoogleGenAI failed for other reasons. */}
-      {process.env.API_KEY && !aiInstance && !alertMessage && (
+      {import.meta.env.VITE_API_KEY && !aiInstance && !alertMessage && (
         <div className="bg-slate-800 p-6 rounded-lg shadow-xl text-center">
           <Spinner />
           <p className="mt-2 text-slate-300">Initialisation du service IA...</p>
@@ -232,7 +232,7 @@ const App: React.FC = () => {
       {alertMessage && <Alert type={alertMessage.type} message={alertMessage.message} onClose={() => setAlertMessage(null)} />}
 
       {/* Only render main UI if aiInstance is successfully created OR if there's an API_KEY (implying initialization is pending or failed but might be retried/handled) */}
-      {(aiInstance || process.env.API_KEY) && (
+      {(aiInstance || import.meta.env.VITE_API_KEY) && (
         <div className="w-full max-w-3xl bg-slate-800 p-6 sm:p-8 rounded-xl shadow-2xl space-y-6">
           <FileUpload onFileSelect={handleFileSelect} isLoading={isLoading} />
 
