@@ -8,7 +8,7 @@ import { Alert } from './components/Alert';
 import { convertPdfToImages } from './services/pdfService';
 import { analyzeImageForSignature } from './services/geminiService';
 import type { PageAnalysisResult, AlertMessage, GeminiPageAnalysis } from './types';
-// GEMINI_MODEL_NAME is still used by geminiService, but not directly in App.tsx for the call
+// GEMINI_MODEL_NAME is not directly used in App.tsx call anymore
 import { MAX_PAGES_TO_PROCESS } from './constants';
 // API_KEY constant removed
 
@@ -112,7 +112,7 @@ const App: React.FC = () => {
       setAlertMessage({ type: 'warning', message: 'Aucun fichier PDF sélectionné.' });
       return;
     }
-    // Removed aiInstance check, proxy handles API availability
+    // Removed aiInstance check
     // if (!aiInstance) {
     //   setAlertMessage({ type: 'error', message: "Le service IA n'est pas initialisé. Vérifiez la configuration de la clé API côté client ou les erreurs précédentes." });
     //   return;
@@ -162,7 +162,7 @@ const App: React.FC = () => {
           throw new Error(`Données d'image invalides pour la page ${pageData.pageNumber}.`);
         }
 
-        // Updated call to analyzeImageForSignature, aiInstance and GEMINI_MODEL_NAME removed
+        // Updated call to analyzeImageForSignature: aiInstance and GEMINI_MODEL_NAME removed
         const analysisResult: GeminiPageAnalysis = await analyzeImageForSignature(base64Data, imageMimeType);
         
         setPages(prev => prev.map(p => p.id === pageData.id ? { ...p, status: 'analyzed', analysis: analysisResult } : p));
@@ -268,7 +268,7 @@ const App: React.FC = () => {
           </div>
         )}
       </div>
-      {/* Closing parenthesis for the main UI div was removed here, as it's no longer conditional based on aiInstance or API_KEY */}
+      {/* Closing brace for the main UI div was removed here as it's no longer conditional */}
       <footer className="mt-12 text-center text-slate-400 text-sm">
         <p>&copy; {new Date().getFullYear()} Vérificateur de Modifications PDF. Propulsé par Gemini AI.</p>
         <p className="text-xs mt-1">Note: Cette application identifie les motifs visuels. Elle ne valide pas l'authenticité cryptographique des signatures.</p>

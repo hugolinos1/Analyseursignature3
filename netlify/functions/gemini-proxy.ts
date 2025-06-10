@@ -1,4 +1,4 @@
-import { GoogleGenAI, Part } from '@google/genai';
+import { GoogleGenAI, Part, HarmCategory, HarmBlockThreshold } from '@google/genai';
 import type { Handler, HandlerEvent, HandlerResponse } from "@netlify/functions";
 
 interface RequestBody {
@@ -14,117 +14,119 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// Basic safety settings - adjust as needed
+const safetySettings = [
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+];
+
 const handler: Handler = async (event: HandlerEvent): Promise<HandlerResponse> => {
   if (event.httpMethod === "OPTIONS") {
-    return {
-      statusCode: 200,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({ message: "OPTIONS request successful" }),
-    };
+    return { statusCode: 200, headers: CORS_HEADERS, body: JSON.stringify({ message: "OPTIONS request successful" }) };
   }
 
   if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({ error: "Method Not Allowed" }),
-    };
+    return { statusCode: 405, headers: CORS_HEADERS, body: JSON.stringify({ error: "Method Not Allowed" }) };
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.error("GEMINI_API_KEY is not set in server-side environment variables.");
-    return {
-      statusCode: 500,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({ error: "API key not configured on the server." }),
-    };
+    return { statusCode: 500, headers: CORS_HEADERS, body: JSON.stringify({ error: "API key not configured on the server." }) };
   }
 
   let requestBody: RequestBody;
-  let rawBodyForErrorLog = ""; // For logging in case of parsing error
-
+  let rawBodyForErrorLog = event.body || "";
   try {
-    if (!event.body) {
-      throw new Error("Request body is missing.");
-    }
-    rawBodyForErrorLog = event.body; // Store raw body before parsing
+    if (!event.body) throw new Error("Request body is missing.");
     requestBody = JSON.parse(event.body);
-  } catch (error) {
-    console.error("Error parsing request body:", error, "Raw body:", rawBodyForErrorLog);
-    return {
-      statusCode: 400,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({ error: "Invalid request body: " + (error as Error).message }),
-    };
+  } catch (parseError: any) {
+    console.error("Error parsing request body:", parseError.message, "Raw body:", rawBodyForErrorLog.substring(0, 500));
+    return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: "Invalid request body: " + parseError.message }) };
   }
 
   const { imageBase64Data, mimeType, modelName, promptText } = requestBody;
-
   if (!imageBase64Data || !mimeType || !modelName || !promptText) {
-    return {
-      statusCode: 400,
-      headers: CORS_HEADERS,
-      body: JSON.stringify({ error: "Missing required fields: imageBase64Data, mimeType, modelName, promptText." }),
-    };
+    const missingFields = ["imageBase64Data", "mimeType", "modelName", "promptText"].filter(field => !requestBody[field as keyof RequestBody]);
+    console.error("Missing required fields:", missingFields.join(', '));
+    return { statusCode: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: `Missing required fields: ${missingFields.join(', ')}.` }) };
   }
 
-  let jsonTextFroGemini = ""; // To store raw text from Gemini for error logging
+  let geminiResponseText = ""; // For logging raw response text from Gemini in case of parsing error
 
   try {
     const genAI = new GoogleGenAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: modelName });
+    const model = genAI.getGenerativeModel({ model: modelName, safetySettings });
 
-    const imagePart: Part = {
-      inlineData: {
-        mimeType: mimeType,
-        data: imageBase64Data,
-      },
-    };
+    const imagePart: Part = { inlineData: { mimeType, data: imageBase64Data } };
+    const textPart: Part = { text: promptText };
 
-    const textPart: Part = {
-      text: promptText,
-    };
+    console.log(`Calling Gemini API with model: ${modelName}. Prompt length: ${promptText.length}, Image mime-type: ${mimeType}, Image data length: ${imageBase64Data.length}`);
 
     const result = await model.generateContent({
         contents: [{ parts: [imagePart, textPart] }],
         generationConfig: { responseMimeType: "application/json" }
     });
 
-    const geminiResponse = result.response;
-    jsonTextFroGemini = geminiResponse.text().trim();
+    const responseFromGemini = result.response;
+    geminiResponseText = responseFromGemini.text().trim();
+
+    // Log feedback if present, even on success, for diagnostics
+    if (responseFromGemini.promptFeedback) {
+        console.log("Gemini API Prompt Feedback:", JSON.stringify(responseFromGemini.promptFeedback, null, 2));
+        if (responseFromGemini.promptFeedback.blockReason) {
+            // If blocked, this is a critical issue to report
+            throw new Error(`Content blocked by Gemini due to: ${responseFromGemini.promptFeedback.blockReason}. Details: ${JSON.stringify(responseFromGemini.promptFeedback.safetyRatings)}`);
+        }
+    }
 
     const fenceRegex = /^```(?:json)?\s*\n?(.*?)\n?\s*```$/s;
-    const match = jsonTextFroGemini.match(fenceRegex);
+    const match = geminiResponseText.match(fenceRegex);
     if (match && match[1]) {
-      jsonTextFroGemini = match[1].trim();
+      geminiResponseText = match[1].trim();
     }
 
-    // Validate that jsonTextFroGemini is valid JSON before sending
-    JSON.parse(jsonTextFroGemini); // This will throw an error if jsonTextFroGemini is not valid JSON
+    JSON.parse(geminiResponseText); // Validate JSON structure before sending
 
-    return {
-      statusCode: 200,
-      headers: {
-        ...CORS_HEADERS,
-        "Content-Type": "application/json",
-      },
-      body: jsonTextFroGemini, // Forward the cleaned JSON string from Gemini
-    };
+    return { statusCode: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" }, body: geminiResponseText };
 
   } catch (error: any) {
-    console.error("Error calling Gemini API or processing its response:", error);
-    let errorMessage = error.message || "An unknown error occurred with the Gemini API call.";
-    if (error.response?.promptFeedback) {
-        console.error("Gemini API Prompt Feedback:", error.response.promptFeedback);
-        errorMessage += ` (Gemini feedback: ${JSON.stringify(error.response.promptFeedback)})`;
-    } else if (error instanceof SyntaxError) { // Specifically catch JSON parsing errors for Gemini's response
-        errorMessage = `Failed to parse Gemini's response as JSON. Raw response excerpt: ${jsonTextFroGemini.substring(0, 200)}...`;
+    console.error("Error during Gemini API call or processing its response:", error);
+
+    let errorDetails: any = {
+        message: error.message,
+        stack: error.stack?.substring(0, 500) // Limit stack trace length
+    };
+
+    if (error.response && error.response.promptFeedback) {
+        console.error("Gemini API Prompt Feedback (on error):", JSON.stringify(error.response.promptFeedback, null, 2));
+        errorDetails.promptFeedback = error.response.promptFeedback;
     }
+
+    // If the error is from parsing Gemini's response
+    if (error instanceof SyntaxError && geminiResponseText) {
+        errorDetails.message = "Failed to parse Gemini's response as JSON.";
+        errorDetails.rawResponseExcerpt = geminiResponseText.substring(0, 200) + "...";
+    }
+
+    // If the error object has a 'details' property (common in Google API errors)
+    if (error.details) {
+        errorDetails.googleApiDetails = error.details;
+    }
+
+    // For network or other unexpected errors, the basic message and stack are primary.
+    // The `error.toString()` can sometimes provide a concise summary.
+    errorDetails.errorString = error.toString();
+
     return {
       statusCode: 500,
       headers: CORS_HEADERS,
-      body: JSON.stringify({ error: "Failed to analyze image with Gemini API.", details: errorMessage }),
+      body: JSON.stringify({
+        error: "Failed to analyze image with Gemini API.",
+        details: errorDetails
+      }),
     };
   }
 };
